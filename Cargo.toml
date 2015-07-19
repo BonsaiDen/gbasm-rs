@@ -1,0 +1,16 @@
+[package]
+name = "gbasm"
+version = "0.1.0"
+authors = ["Ivo Wetzel <ivo.wetzel@grandcentrix.net>"]
+description = "A Gameboy Assembler"
+repository = "https://github.com/BonsaiDen/gbasm-rs.git"
+readme = "README.md"
+keywords = ["gameboy", "assembler"]
+
+[dependencies.clap]
+version = "1.0.3"
+
+[[bin]]
+name = "gbasm"
+doc = false
+
