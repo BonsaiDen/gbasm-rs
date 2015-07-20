@@ -54,10 +54,10 @@ impl <'a>SourceFile<'a> {
         loop {
             let token = lexer.next();
             match token {
-                &Token::Eof => {
+                Token::Eof => {
                     break;
                 },
-                &Token::Error(ref err) => {
+                Token::Error(ref err) => {
                     println!("Error: {}", err);
                     break;
                 },

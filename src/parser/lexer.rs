@@ -1,10 +1,14 @@
 use parser::Operator;
 use parser::Token;
+use parser::TokenType;
 use compiler::SourceIter;
 
 pub struct Lexer<'a> {
     source: &'a mut SourceIter,
-    token: Token
+    in_macro_args: bool,
+    in_macro_body: bool,
+    paren_depth: u8,
+    last_token_type: TokenType
 }
 
 impl <'a>Lexer<'a> {
@@ -16,21 +20,127 @@ impl <'a>Lexer<'a> {
 
         Lexer {
             source: source,
-            token: Token::Eof
+            in_macro_args: false,
+            in_macro_body: false,
+            paren_depth: 0,
+            last_token_type: TokenType::Begin
         }
 
     }
 
-    pub fn get<'b>(&'b self) -> &'b Token {
-        &self.token
+    pub fn next(&mut self) -> Token {
+
+        let token = match self.next_token() {
+
+            // Combine offset labels with their argument
+            Token::PositiveOffset => {
+                match self.next_token() {
+                    Token::Number(val) => Token::Offset(val as i32),
+                    _ => Token::Error("Expected number after offset sign".to_string())
+                }
+            },
+
+            Token::NegativeOffset => {
+                match self.next_token() {
+                    Token::Number(val) => Token::Offset(-(val as i32)),
+                    _ => Token::Error("Expected number after offset sign".to_string())
+                }
+            },
+
+            // Disallow macro args outside of macro signatures and bodies
+            Token::MacroArg(name) => {
+                if !self.in_macro_args && !self.in_macro_body {
+                    Token::Error(format!("Unexpected MarcoArg @{} outside of marco arguments or macro body", name))
+
+                } else {
+                    Token::MacroArg(name.to_owned())
+                }
+            },
+
+            // Combine macro tokens with their name
+            Token::MacroDef => {
+                match self.next_token() {
+                    Token::Name(name) => {
+                        if self.in_macro_args {
+                            Token::Error("Already inside a MACRO arguments signature".to_string())
+
+                        } else {
+                            self.in_macro_args = true;
+                            Token::Macro(name)
+                        }
+                    },
+                    _ => Token::Error("Expected name after MARCO directive".to_string())
+                }
+            },
+
+            // End Macro bodies
+            token @ Token::MacroEnd => {
+                if !self.in_macro_body {
+                    Token::Error("Unexpected MARCO_END directive outside of macro".to_string())
+
+                } else {
+                    self.in_macro_body = false;
+                    token
+                }
+            },
+
+            // Find and build expressions
+            mut token => {
+
+                // Wait for macro argument definitions to close
+                if self.in_macro_args {
+                    if token == Token::RParen {
+                        self.in_macro_args = false;
+                        self.in_macro_body = true;
+                    }
+                    token
+
+                } else {
+
+                    // Collect expression tokens
+                    let mut expression_stack = vec![];
+                    while is_expression(&self.last_token_type, &token.to_type(), self.paren_depth) {
+                        self.last_token_type = token.to_type();
+                        expression_stack.push(token);
+                        token = self.next_token();
+                    }
+
+                    if expression_stack.len() > 0 {
+                        println!("expression stack: {:?}", expression_stack);
+                        Token::Expression
+
+                    } else {
+                        token
+                    }
+
+                }
+
+            }
+
+        };
+
+        self.last_token_type = token.to_type();
+        token
+
     }
 
-    pub fn next<'b>(&'b mut self) -> &'b Token {
+    fn next_token(&mut self) -> Token {
+        loop {
+            match self.next_raw_token() {
+                Token::Whitespace | Token::Comment(_) => {
+                    continue;
+                },
+                token => return token
+            }
+        }
+    }
+
+    fn next_raw_token(&mut self) -> Token {
 
         let ch: u8 = self.source.get();
         let next: u8 = self.source.peek();
 
-        self.token = match ch {
+        match ch {
 
             // Newlines
             10 | 13 => {
@@ -108,9 +218,7 @@ impl <'a>Lexer<'a> {
             // Unkown symbols
             _ => Token::Error(format!("Unexpected character \"{}\" ({})", "", ch))
 
-        };
-
-        &self.token
+        }
 
     }
 
@@ -627,6 +735,90 @@ fn is_operator(c: u8) -> bool {
         124 => true,
         126 => true,
         _ => false
+    }
+}
+
+fn is_expression(last: &TokenType, next: &TokenType, depth: u8) -> bool {
+
+    match (last, next) {
+
+        // Commas always separate expressions when outside of parenthesis
+        (&TokenType::Comma, _) if depth == 0 => false,
+        (_, &TokenType::Comma) if depth == 0 => false,
+
+        // Left Parenthesis
+        (&TokenType::LParen, &TokenType::Name) => true,
+        (&TokenType::LParen, &TokenType::LocalLabelRef) => true,
+        (&TokenType::LParen, &TokenType::Number) => true,
+        (&TokenType::LParen, &TokenType::String) => true,
+        (&TokenType::LParen, &TokenType::Operator) => true,
+        (&TokenType::LParen, &TokenType::LParen) => true,
+        (&TokenType::LParen, &TokenType::RParen) => true,
+        (&TokenType::LParen, &TokenType::MacroArg) => true,
+
+        (&TokenType::Directive, &TokenType::LParen) => true,
+
+        // Right Parenthesis
+        (&TokenType::RParen, &TokenType::RParen) => true,
+        (&TokenType::RParen, &TokenType::Operator) => true,
+
+        // Operators
+        (&TokenType::Operator, &TokenType::LParen) => true,
+        (&TokenType::Operator, &TokenType::Number) => true,
+        (&TokenType::Operator, &TokenType::String) => true,
+        (&TokenType::Operator, &TokenType::LocalLabelRef) => true,
+        (&TokenType::Operator, &TokenType::Name) => true,
+        (&TokenType::Operator, &TokenType::MacroArg) => true,
+
+        // Numbers
+        (&TokenType::Number, &TokenType::RParen) => true,
+        (&TokenType::Number, &TokenType::Operator) => true,
+        (&TokenType::Number, &TokenType::Comma) => true,
+
+        // Strings
+        (&TokenType::String, &TokenType::RParen) => true,
+        (&TokenType::String, &TokenType::Operator) => true,
+        (&TokenType::String, &TokenType::Comma) => true,
+
+        // LocalLabelRef
+        (&TokenType::LocalLabelRef, &TokenType::RParen) => true,
+        (&TokenType::LocalLabelRef, &TokenType::Operator) => true,
+        (&TokenType::LocalLabelRef, &TokenType::Comma) => true,
+
+        // Names
+        (&TokenType::Name, &TokenType::LParen) => true,
+        (&TokenType::Name, &TokenType::RParen) => true,
+        (&TokenType::Name, &TokenType::Operator) => true,
+        (&TokenType::Name, &TokenType::Comma) => true,
+
+        // Macro Args
+        (&TokenType::MacroArg, &TokenType::LParen) => true,
+        (&TokenType::MacroArg, &TokenType::RParen) => true,
+        (&TokenType::MacroArg, &TokenType::Operator) => true,
+        (&TokenType::MacroArg, &TokenType::Comma) => true,
+
+        // Comma
+        (&TokenType::Comma, &TokenType::LParen) => true,
+        (&TokenType::Comma, &TokenType::Name) => true,
+        (&TokenType::Comma, &TokenType::String) => true,
+        (&TokenType::Comma, &TokenType::Number) => true,
+        (&TokenType::Comma, &TokenType::MacroArg) => true,
+
+        // Begin
+        (&TokenType::Begin, &TokenType::LParen) => true,
+        (&TokenType::Begin, &TokenType::Name) => true,
+        (&TokenType::Begin, &TokenType::String) => true,
+        (&TokenType::Begin, &TokenType::Number) => true,
+
+        // Newline
+        (&TokenType::Newline, &TokenType::LParen) => true,
+        (&TokenType::Newline, &TokenType::Name) => true,
+        (&TokenType::Newline, &TokenType::String) => true,
+        (&TokenType::Newline, &TokenType::Number) => true,
+
+        // Everything else
+        (_, _) => false
+
     }
 }
 
