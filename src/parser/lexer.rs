@@ -1,6 +1,7 @@
 use parser::Operator;
 use parser::Token;
 use parser::TokenType;
+use parser::Expression;
 use compiler::SourceIter;
 
 pub struct Lexer<'a> {
@@ -11,24 +12,11 @@ pub struct Lexer<'a> {
     last_token_type: TokenType
 }
 
-impl <'a>Lexer<'a> {
+impl<'a> Iterator for Lexer<'a> {
 
-    pub fn new(source: &'a mut SourceIter) -> Lexer<'a> {
+    type Item = Token;
 
-        // Goto first byte in iterator
-        source.next();
-
-        Lexer {
-            source: source,
-            in_macro_args: false,
-            in_macro_body: false,
-            paren_depth: 0,
-            last_token_type: TokenType::Begin
-        }
-
-    }
-
-    pub fn next(&mut self) -> Token {
+    fn next(&mut self) -> Option<Token> {
 
         let token = match self.next_token() {
 
@@ -97,17 +85,32 @@ impl <'a>Lexer<'a> {
 
                 } else {
 
-                    // Collect expression tokens
+
+                    // Collect expression tokens, wrapping the stack in
+                    // parenthesis for easier parsing
                     let mut expression_stack = vec![];
                     while is_expression(&self.last_token_type, &token.to_type(), self.paren_depth) {
+
+                        match token {
+                            Token::LParen => self.paren_depth += 1,
+                            Token::RParen => self.paren_depth -= 1,
+                            _ => {}
+                        };
+
                         self.last_token_type = token.to_type();
+
+                        if expression_stack.len() == 0 {
+                            expression_stack.push(Token::LParen);
+                        }
+
                         expression_stack.push(token);
                         token = self.next_token();
+
                     }
 
                     if expression_stack.len() > 0 {
-                        println!("expression stack: {:?}", expression_stack);
-                        Token::Expression
+                        expression_stack.push(Token::RParen);
+                        Token::Expression(Expression::new(expression_stack))
 
                     } else {
                         token
@@ -120,7 +123,26 @@ impl <'a>Lexer<'a> {
         };
 
         self.last_token_type = token.to_type();
-        token
+        Some(token)
+
+    }
+
+}
+
+impl <'a>Lexer<'a> {
+
+    pub fn new(source: &'a mut SourceIter) -> Lexer<'a> {
+
+        // Goto first byte in iterator
+        source.next();
+
+        Lexer {
+            source: source,
+            in_macro_args: false,
+            in_macro_body: false,
+            paren_depth: 0,
+            last_token_type: TokenType::Begin
+        }
 
     }
 
@@ -232,7 +254,7 @@ impl <'a>Lexer<'a> {
             self.source.next();
         }
 
-        Token::Comment(to_string(bytes))
+        Token::Comment(string_from_bytes(bytes))
 
     }
 
@@ -476,7 +498,7 @@ impl <'a>Lexer<'a> {
             ch = self.source.next();
         }
 
-        let name = to_string(bytes);
+        let name = string_from_bytes(bytes);
 
         if is_instruction(&name[..]) {
             Token::Instruction(name)
@@ -520,11 +542,11 @@ impl <'a>Lexer<'a> {
         // Label Definition
         if ch == 58 {
             self.source.next();
-            Token::LocalLabelDef(to_string(bytes))
+            Token::LocalLabelDef(string_from_bytes(bytes))
 
         // Label Reference
         } else {
-            Token::LocalLabelRef(to_string(bytes))
+            Token::LocalLabelRef(string_from_bytes(bytes))
         }
 
     }
@@ -554,7 +576,7 @@ impl <'a>Lexer<'a> {
                 ch = self.source.next();
             }
 
-            Token::MacroArg(to_string(bytes))
+            Token::MacroArg(string_from_bytes(bytes))
 
         } else{
             Token::Error(format!("Unexpected \"{}\", expected a valid direction specifier (- or +) instead", sign))
@@ -566,7 +588,7 @@ impl <'a>Lexer<'a> {
 
 
 // Helpers --------------------------------------------------------------------
-fn to_string(bytes: Vec<u8>) -> String {
+fn string_from_bytes(bytes: Vec<u8>) -> String {
     match String::from_utf8(bytes) {
         Ok(v) => v,
         Err(_) => String::new()
@@ -756,8 +778,6 @@ fn is_expression(last: &TokenType, next: &TokenType, depth: u8) -> bool {
         (&TokenType::LParen, &TokenType::RParen) => true,
         (&TokenType::LParen, &TokenType::MacroArg) => true,
 
-        (&TokenType::Directive, &TokenType::LParen) => true,
-
         // Right Parenthesis
         (&TokenType::RParen, &TokenType::RParen) => true,
         (&TokenType::RParen, &TokenType::Operator) => true,
@@ -804,17 +824,19 @@ fn is_expression(last: &TokenType, next: &TokenType, depth: u8) -> bool {
         (&TokenType::Comma, &TokenType::Number) => true,
         (&TokenType::Comma, &TokenType::MacroArg) => true,
 
-        // Begin
-        (&TokenType::Begin, &TokenType::LParen) => true,
-        (&TokenType::Begin, &TokenType::Name) => true,
-        (&TokenType::Begin, &TokenType::String) => true,
-        (&TokenType::Begin, &TokenType::Number) => true,
+        // Directive Values
+        (&TokenType::Directive, &TokenType::LParen) => true,
+        (&TokenType::Directive, &TokenType::Name) => true,
+        (&TokenType::Directive, &TokenType::String) => true,
+        (&TokenType::Directive, &TokenType::Number) => true,
+        (&TokenType::Directive, &TokenType::MacroArg) => true,
 
-        // Newline
-        (&TokenType::Newline, &TokenType::LParen) => true,
-        (&TokenType::Newline, &TokenType::Name) => true,
-        (&TokenType::Newline, &TokenType::String) => true,
-        (&TokenType::Newline, &TokenType::Number) => true,
+        // Instruction Values
+        (&TokenType::Instruction, &TokenType::LParen) => true,
+        (&TokenType::Instruction, &TokenType::Name) => true,
+        (&TokenType::Instruction, &TokenType::String) => true,
+        (&TokenType::Instruction, &TokenType::Number) => true,
+        (&TokenType::Instruction, &TokenType::MacroArg) => true,
 
         // Everything else
         (_, _) => false

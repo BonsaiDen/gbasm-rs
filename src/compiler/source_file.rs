@@ -49,11 +49,10 @@ impl <'a>SourceFile<'a> {
 
     pub fn parse(&mut self) {
 
-        let mut lexer = Lexer::new(self);
+        let mut lexer = Lexer::new(self).peekable();
 
         loop {
-            let token = lexer.next();
-            match token {
+            match lexer.next().unwrap() {
                 Token::Eof => {
                     break;
                 },
@@ -61,7 +60,7 @@ impl <'a>SourceFile<'a> {
                     println!("Error: {}", err);
                     break;
                 },
-                _ => println!("{:?}", token)
+                token => println!("{:?}", token)
             }
         }
 

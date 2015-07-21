@@ -1,4 +1,5 @@
 use parser::Operator;
+use parser::Expression;
 
 #[derive(Debug, PartialEq)]
 pub enum Token {
@@ -8,7 +9,7 @@ pub enum Token {
     String(String),
     Directive(String),
     Instruction(String),
-    Expression,
+    Expression(Expression),
     Name(String),
     Number(f32),
     Operator(Operator),
@@ -40,7 +41,7 @@ impl Token {
             &Token::String(_) => TokenType::String,
             &Token::Directive(_) => TokenType::Directive,
             &Token::Instruction(_) => TokenType::Instruction,
-            &Token::Expression => TokenType::Expression,
+            &Token::Expression(_) => TokenType::Expression,
             &Token::Name(_) => TokenType::Name,
             &Token::Number(_) => TokenType::Number,
             &Token::Operator(_) => TokenType::Operator,
