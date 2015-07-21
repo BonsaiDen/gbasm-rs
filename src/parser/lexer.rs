@@ -1,22 +1,43 @@
+use std::iter;
+
 use parser::Operator;
 use parser::Token;
 use parser::TokenType;
 use parser::Expression;
 use compiler::SourceIter;
 
+/// Assembly Tokenizer which already builts expression trees
 pub struct Lexer<'a> {
-    source: &'a mut SourceIter,
+    lexer: iter::Peekable<BaseLexer<'a>>,
     in_macro_args: bool,
     in_macro_body: bool,
     paren_depth: u8,
     last_token_type: TokenType
 }
 
+impl <'a>Lexer<'a> {
+
+    pub fn new(source: &'a mut SourceIter) -> Lexer<'a> {
+        Lexer {
+            lexer: BaseLexer::new(source).peekable(),
+            in_macro_args: false,
+            in_macro_body: false,
+            paren_depth: 0,
+            last_token_type: TokenType::Begin
+        }
+    }
+
+    fn next_token(&mut self) -> Token {
+        self.lexer.next().unwrap()
+    }
+
+}
+
 impl<'a> Iterator for Lexer<'a> {
 
     type Item = Token;
 
-    fn next(&mut self) -> Option<Token> {
+    fn next(&mut self) -> Option<Self::Item> {
 
         let token = match self.next_token() {
 
@@ -73,7 +94,7 @@ impl<'a> Iterator for Lexer<'a> {
             },
 
             // Find and build expressions
-            mut token => {
+            token => {
 
                 // Wait for macro argument definitions to close
                 if self.in_macro_args {
@@ -85,30 +106,43 @@ impl<'a> Iterator for Lexer<'a> {
 
                 } else {
 
-
                     // Collect expression tokens, wrapping the stack in
                     // parenthesis for easier parsing
-                    let mut expression_stack = vec![];
-                    while is_expression(&self.last_token_type, &token.to_type(), self.paren_depth) {
+                    let mut token_type = token.to_type();
 
-                        match token {
-                            Token::LParen => self.paren_depth += 1,
-                            Token::RParen => self.paren_depth -= 1,
-                            _ => {}
-                        };
+                    if is_expression(&self.last_token_type, &token_type, self.paren_depth) {
 
-                        self.last_token_type = token.to_type();
+                        // Start expression stack
+                        let mut expression_stack = vec![Token::LParen, token];
 
-                        if expression_stack.len() == 0 {
-                            expression_stack.push(Token::LParen);
+                        loop {
+
+                            // Handle parenthesis nesting
+                            match token_type {
+                                TokenType::LParen => self.paren_depth += 1,
+                                TokenType::RParen => self.paren_depth -= 1,
+                                _ => {}
+                            };
+
+                            // Remember last token type
+                            self.last_token_type = token_type;
+
+                            // Peek next token type
+                            token_type = match self.lexer.peek() {
+                                Some(token) => token.to_type(),
+                                None => TokenType::Eof
+                            };
+
+                            // Check if the expression continues
+                            if is_expression(&self.last_token_type, &token_type, self.paren_depth) {
+                                expression_stack.push(self.next_token());
+
+                            } else {
+                                break
+                            }
+
                         }
 
-                        expression_stack.push(token);
-                        token = self.next_token();
-
-                    }
-
-                    if expression_stack.len() > 0 {
                         expression_stack.push(Token::RParen);
                         Token::Expression(Expression::new(expression_stack))
 
@@ -129,98 +163,105 @@ impl<'a> Iterator for Lexer<'a> {
 
 }
 
-impl <'a>Lexer<'a> {
+struct BaseLexer<'a> {
+    source: &'a mut SourceIter
+}
 
-    pub fn new(source: &'a mut SourceIter) -> Lexer<'a> {
 
-        // Goto first byte in iterator
-        source.next();
+impl<'a> Iterator for BaseLexer<'a> {
 
-        Lexer {
-            source: source,
-            in_macro_args: false,
-            in_macro_body: false,
-            paren_depth: 0,
-            last_token_type: TokenType::Begin
-        }
+    type Item = Token;
 
-    }
-
-    fn next_token(&mut self) -> Token {
+    fn next(&mut self) -> Option<Self::Item> {
         loop {
             match self.next_raw_token() {
                 Token::Whitespace | Token::Comment(_) => {
                     continue;
                 },
-                token => return token
+                token => return Some(token)
             }
         }
     }
 
+}
+
+impl <'a>BaseLexer<'a> {
+
+    pub fn new(source: &'a mut SourceIter) -> BaseLexer<'a> {
+
+        // Goto first byte in iterator
+        source.next();
+
+        BaseLexer {
+            source: source
+        }
+
+    }
+
     fn next_raw_token(&mut self) -> Token {
 
-        let ch: u8 = self.source.get();
-        let next: u8 = self.source.peek();
+        let ch = self.source.get();
+        let next = self.source.peek();
 
         match ch {
 
             // Newlines
-            10 | 13 => {
+            b'\r' | b'\n' => {
                 self.source.next();
                 Token::Newline
             },
 
             // Parse Comments
-            59 => self.parse_comment(),
+            b';' => self.parse_comment(),
 
             // Parse Parenthesis and Commas
-            40 => {
+            b'(' => {
                 self.source.next();
                 Token::LParen
             }
-            41 => {
+            b')' => {
                 self.source.next();
                 Token::RParen
             },
-            91 => {
+            b'[' => {
                 self.source.next();
                 Token::LBrace
-            },
-            93 => {
+            }
+            b']' => {
                 self.source.next();
                 Token::RBrace
-            },
-            44 => {
+            }
+            b',' => {
                 self.source.next();
                 Token::Comma
-            },
+            }
 
             // Parse Strings
-            34 | 39 => self.parse_string(),
+            b'"' | b'\'' => self.parse_string(),
 
             // Parse relative Address offsets and Macro Arguments
-            64 => self.parse_offset_or_macro_arg(),
+            b'@' => self.parse_offset_or_macro_arg(),
 
             // Parse negative Decimal Numbers
-            45 if is_decimal(next) => {
+            b'-' if is_decimal(next) => {
                 self.source.next();
                 self.parse_decimal(true)
-            },
+            }
 
             // Parse Binary Numbers
-            37 if is_binary(next) => {
+            b'%' if is_binary(next) => {
                 self.source.next();
                 self.parse_binary()
-            },
+            }
 
             // Parse Hexadecimal Numbers
-            36 if is_hex(next) => {
+            b'$' if is_hex(next) => {
                 self.source.next();
                 self.parse_hex()
-            },
+            }
 
             // Parse local Labels
-            46 if is_name_start(next) => self.parse_local_label(),
+            b'.' if is_name_start(next) => self.parse_local_label(),
 
             // Skip Whitespace
             _ if is_whitespace(ch) => self.parse_whitespace(),
@@ -274,17 +315,17 @@ impl <'a>Lexer<'a> {
         while ch != delimiter && !self.source.is_empty() {
 
             // Escape sequences
-            if ch == 92 {
+            if ch == b'\\' {
                 bytes.push(match self.source.next() {
-                    34 => 34,
-                    39 => 39,
-                    48 => 0,
-                    98 => 7,
-                    92 => 92,
-                    110 => 10,
-                    114 => 13,
-                    118 => 11,
-                    116 => 9,
+                    b'0' => 0,
+                    b'b' => 7,
+                    b't' => 9,
+                    b'n' => 10,
+                    b'v' => 11,
+                    b'r' => 13,
+                    b'"' => 34,
+                    b'\'' => 39,
+                    b'\\' => 92,
                     c => {
                         return Token::Error(format!("Unkown character escape sequence \"{}\" in string literal", c))
                     }
@@ -318,61 +359,61 @@ impl <'a>Lexer<'a> {
         match (ch, next) {
 
             // Double Character Operators
-            (61, 61) => {
+            (b'=', b'=') => {
                 self.source.next();
                 Token::Operator(Operator::Equal)
             }
-            (62, 62) => {
+            (b'>', b'>') => {
                 self.source.next();
                 Token::Operator(Operator::ShiftRight)
             }
-            (60, 60) => {
+            (b'<', b'<') => {
                 self.source.next();
                 Token::Operator(Operator::ShiftLeft)
             }
-            (38, 38) => {
+            (b'&', b'&') => {
                 self.source.next();
                 Token::Operator(Operator::LogicalAnd)
             }
-            (124, 124) => {
+            (b'|', b'|') => {
                 self.source.next();
                 Token::Operator(Operator::LogicalOr)
             }
-            (33, 61) => {
+            (b'!', b'=') => {
                 self.source.next();
                 Token::Operator(Operator::NotEqual)
             }
-            (62, 61) => {
+            (b'>', b'=') => {
                 self.source.next();
                 Token::Operator(Operator::GreaterThanEqual)
             }
-            (60, 61) => {
+            (b'<', b'=') => {
                 self.source.next();
                 Token::Operator(Operator::LessThanEqual)
             }
-            (47, 47) => {
+            (b'/', b'/') => {
                 self.source.next();
                 Token::Operator(Operator::IntegerDivide)
             }
-            (42, 42) => {
+            (b'*', b'*') => {
                 self.source.next();
                 Token::Operator(Operator::Power)
             }
 
             // Single Character Operatots
             (_, _) => match ch {
-                60 => Token::Operator(Operator::GreaterThan),
-                62 => Token::Operator(Operator::LessThan),
-                33 => Token::Operator(Operator::UnaryNot),
-                43 => Token::Operator(Operator::Plus),
-                45 => Token::Operator(Operator::Minus),
-                42 => Token::Operator(Operator::Multiply),
-                47 => Token::Operator(Operator::Divide),
-                37 => Token::Operator(Operator::Modulo),
-                38 => Token::Operator(Operator::BitwiseAnd),
-                124 => Token::Operator(Operator::BitwiseOr),
-                126 => Token::Operator(Operator::Negate),
-                94 => Token::Operator(Operator::BitwiseXor),
+                b'>' => Token::Operator(Operator::GreaterThan),
+                b'<' => Token::Operator(Operator::LessThan),
+                b'!' => Token::Operator(Operator::UnaryNot),
+                b'+' => Token::Operator(Operator::Plus),
+                b'-' => Token::Operator(Operator::Minus),
+                b'*' => Token::Operator(Operator::Multiply),
+                b'/' => Token::Operator(Operator::Divide),
+                b'%' => Token::Operator(Operator::Modulo),
+                b'&' => Token::Operator(Operator::BitwiseAnd),
+                b'|' => Token::Operator(Operator::BitwiseOr),
+                b'~' => Token::Operator(Operator::Negate),
+                b'^' => Token::Operator(Operator::BitwiseXor),
                 _ => Token::Error(format!("Invalid operator \"{}\"", ch))
             }
 
@@ -388,7 +429,7 @@ impl <'a>Lexer<'a> {
             Token::Error("Decimal literal exceeds maximum length of 8 digits".to_string())
 
         // Floats
-        } else if digit == 46 {
+        } else if digit == b'.' {
 
             self.source.next();
 
@@ -411,13 +452,13 @@ impl <'a>Lexer<'a> {
         let mut digit = self.source.get();
         let mut bytes: Vec<u8> = Vec::new();
 
-        while !self.source.is_empty() && is_decimal(digit) {
+        while is_decimal(digit) {
 
-            bytes.push(digit - 48);
+            bytes.push(digit - b'0');
             digit = self.source.next();
 
             // Ignore interleaved underscore characters
-            if digit == 95 {
+            if digit == b'_' {
                 digit = self.source.next();
 
             } else if bytes.len() == 8 {
@@ -435,13 +476,13 @@ impl <'a>Lexer<'a> {
         let mut digit = self.source.get();
         let mut bytes: Vec<u8> = Vec::new();
 
-        while !self.source.is_empty() && is_binary(digit) {
+        while is_binary(digit) {
 
-            bytes.push(digit - 48);
+            bytes.push(digit - b'0');
             digit = self.source.next();
 
             // Ignore interleaved underscore characters
-            if digit == 95 {
+            if digit == b'_' {
                 digit = self.source.next();
 
             } else if bytes.len() == 9 {
@@ -459,23 +500,23 @@ impl <'a>Lexer<'a> {
         let mut digit = self.source.get();
         let mut bytes: Vec<u8> = Vec::new();
 
-        while !self.source.is_empty() && is_hex(digit) {
+        while is_hex(digit) {
 
-            if digit >= 97 {
+            if digit >= b'a' {
                 digit -= 87;
 
-            } else if digit >= 65 {
+            } else if digit >= b'A' {
                 digit -= 55;
 
             } else {
-                digit -= 48;
+                digit -= b'0';
             }
 
             bytes.push(digit);
             digit = self.source.next();
 
             // Ignore interleaved underscore characters
-            if digit == 95 {
+            if digit == b'_' {
                 digit = self.source.next();
 
             } else if bytes.len() == 5 {
@@ -493,7 +534,7 @@ impl <'a>Lexer<'a> {
         let mut bytes: Vec<u8> = Vec::new();
         let mut ch = self.source.get();
 
-        while !self.source.is_empty() && is_name_part(ch) {
+        while is_name_part(ch) {
             bytes.push(ch);
             ch = self.source.next();
         }
@@ -515,7 +556,7 @@ impl <'a>Lexer<'a> {
         } else if name != "" {
 
             // Global Label Definitions
-            if ch == 58 {
+            if ch == b':' {
                 self.source.next();
                 Token::GlobalLabelDef(name)
 
@@ -534,13 +575,13 @@ impl <'a>Lexer<'a> {
         let mut bytes: Vec<u8> = vec![self.source.get()];
         let mut ch = self.source.next();
 
-        while !self.source.is_empty() && is_name_part(ch) {
+        while is_name_part(ch) {
             bytes.push(ch);
             ch = self.source.next();
         }
 
         // Label Definition
-        if ch == 58 {
+        if ch == b':' {
             self.source.next();
             Token::LocalLabelDef(string_from_bytes(bytes))
 
@@ -556,12 +597,12 @@ impl <'a>Lexer<'a> {
         let sign = self.source.next();
 
         // Negative Offset
-        if sign == 45 {
+        if sign == b'-' {
             self.source.next();
             Token::NegativeOffset
 
         // Positive Offset
-        } else if sign == 43 {
+        } else if sign == b'+' {
             self.source.next();
             Token::PositiveOffset
 
@@ -571,7 +612,7 @@ impl <'a>Lexer<'a> {
             let mut bytes: Vec<u8> = vec![sign];
             let mut ch = self.source.next();
 
-            while !self.source.is_empty() && is_name_part(ch) {
+            while is_name_part(ch) {
                 bytes.push(ch);
                 ch = self.source.next();
             }
@@ -690,9 +731,9 @@ fn is_directive(name: &str) -> bool {
 
 fn is_name_start(c: u8) -> bool {
     match c {
-        65...90 => true,
-        95 => true,
-        97...122 => true,
+        b'A'...b'Z' => true,
+        b'_' => true,
+        b'a'...b'z' => true,
         _ => false
     }
 }
@@ -703,31 +744,31 @@ fn is_name_part(c: u8) -> bool {
 
 fn is_decimal(c: u8) -> bool {
     match c {
-        48...57 => true,
+        b'0'...b'9' => true,
         _ => false
     }
 }
 
 fn is_binary(c: u8) -> bool {
     match c {
-        48 => true,
-        49 => true,
+        b'0' => true,
+        b'1' => true,
         _ => false
     }
 }
 
 fn is_hex(c: u8) -> bool {
     match c {
-        97...102 => true,
-        65...70 => true,
+        b'a'...b'f' => true,
+        b'A'...b'F' => true,
         _ => is_decimal(c)
     }
 }
 
 fn is_newline(c: u8) -> bool {
     match c {
-        10 => true,
-        13 => true,
+        b'\r' => true,
+        b'\n' => true,
         _ => false
     }
 }
@@ -736,26 +777,26 @@ fn is_whitespace(c: u8) -> bool {
     match c {
         9 => true,
         11 => true,
-        32 => true,
+        b' ' => true,
         _ => false
     }
 }
 
 fn is_operator(c: u8) -> bool {
     match c {
-        33 => true,
-        37 => true,
-        38 => true,
-        42 => true,
-        43 => true,
-        45 => true,
-        47 => true,
-        60 => true,
-        61 => true,
-        62 => true,
-        94 => true,
-        124 => true,
-        126 => true,
+        b'!' => true,
+        b'%' => true,
+        b'&' => true,
+        b'*' => true,
+        b'+' => true,
+        b'-' => true,
+        b'/' => true,
+        b'<' => true,
+        b'=' => true,
+        b'>' => true,
+        b'^' => true,
+        b'|' => true,
+        b'~' => true,
         _ => false
     }
 }

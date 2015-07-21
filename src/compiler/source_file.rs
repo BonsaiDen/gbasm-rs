@@ -7,7 +7,7 @@ use compiler::SourceIter;
 use parser::Lexer;
 use parser::Token;
 
-/// A struct which represents an on disk assembly file
+/// A struct which represents an assembly source from a file on disk
 pub struct SourceFile<'a> {
 
     /// An optional parent file which included this file
