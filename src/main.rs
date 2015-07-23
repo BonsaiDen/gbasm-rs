@@ -3,7 +3,7 @@ extern crate clap;
 extern crate gbasm;
 
 fn main() {
-    
+
     let args = clap::App::new("gbasm")
         .version(&crate_version!())
         .author("Ivo Wetzel <ivo.wetzel@googlemail.com>")
@@ -91,18 +91,18 @@ fn main() {
             if let Some(ref symfile) = args.value_of("symfile") {
                 c.generate_symbol_file(symfile);
             }
-            
+
             // Generate mapping file
             if let Some(ref mapfile) = args.value_of("mapfile") {
                 c.generate_mapping_file(mapfile);
             }
-            
+
             // Generate json file
             if let Some(ref jsonfile) = args.value_of("jsonfile") {
                 c.generate_json_file(jsonfile);
             }
 
-        }, 
+        },
 
         None => {
             println!("{}", args.usage());
