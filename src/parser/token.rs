@@ -66,7 +66,7 @@ impl Token {
     }
 }
 
-#[derive(Debug)]
+#[derive(Copy, Clone)]
 pub enum TokenType {
     Newline,
     Whitespace,

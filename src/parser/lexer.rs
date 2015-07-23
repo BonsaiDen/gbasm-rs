@@ -110,7 +110,7 @@ impl<'a> Iterator for Lexer<'a> {
                     // parenthesis for easier parsing
                     let mut token_type = token.to_type();
 
-                    if is_expression(&self.last_token_type, &token_type, self.paren_depth) {
+                    if is_expression(self.last_token_type, token_type, self.paren_depth) {
 
                         // Start expression stack
                         let mut expression_stack = vec![Token::LParen, token];
@@ -134,7 +134,7 @@ impl<'a> Iterator for Lexer<'a> {
                             };
 
                             // Check if the expression continues
-                            if is_expression(&self.last_token_type, &token_type, self.paren_depth) {
+                            if is_expression(self.last_token_type, token_type, self.paren_depth) {
                                 expression_stack.push(self.next_token());
 
                             } else {
@@ -163,83 +163,83 @@ impl<'a> Iterator for Lexer<'a> {
 
 }
 
-fn is_expression(last: &TokenType, next: &TokenType, depth: u8) -> bool {
+fn is_expression(last: TokenType, next: TokenType, depth: u8) -> bool {
 
     match (last, next) {
 
         // Commas always separate expressions when outside of parenthesis
-        (&TokenType::Comma, _) if depth == 0 => false,
-        (_, &TokenType::Comma) if depth == 0 => false,
+        (TokenType::Comma, _) if depth == 0 => false,
+        (_, TokenType::Comma) if depth == 0 => false,
 
         // Left Parenthesis
-        (&TokenType::LParen, &TokenType::Name) => true,
-        (&TokenType::LParen, &TokenType::LocalLabelRef) => true,
-        (&TokenType::LParen, &TokenType::Number) => true,
-        (&TokenType::LParen, &TokenType::String) => true,
-        (&TokenType::LParen, &TokenType::Operator) => true,
-        (&TokenType::LParen, &TokenType::LParen) => true,
-        (&TokenType::LParen, &TokenType::RParen) => true,
-        (&TokenType::LParen, &TokenType::MacroArg) => true,
+        (TokenType::LParen, TokenType::Name) => true,
+        (TokenType::LParen, TokenType::LocalLabelRef) => true,
+        (TokenType::LParen, TokenType::Number) => true,
+        (TokenType::LParen, TokenType::String) => true,
+        (TokenType::LParen, TokenType::Operator) => true,
+        (TokenType::LParen, TokenType::LParen) => true,
+        (TokenType::LParen, TokenType::RParen) => true,
+        (TokenType::LParen, TokenType::MacroArg) => true,
 
         // Right Parenthesis
-        (&TokenType::RParen, &TokenType::RParen) => true,
-        (&TokenType::RParen, &TokenType::Operator) => true,
+        (TokenType::RParen, TokenType::RParen) => true,
+        (TokenType::RParen, TokenType::Operator) => true,
 
         // Operators
-        (&TokenType::Operator, &TokenType::LParen) => true,
-        (&TokenType::Operator, &TokenType::Number) => true,
-        (&TokenType::Operator, &TokenType::String) => true,
-        (&TokenType::Operator, &TokenType::LocalLabelRef) => true,
-        (&TokenType::Operator, &TokenType::Name) => true,
-        (&TokenType::Operator, &TokenType::MacroArg) => true,
+        (TokenType::Operator, TokenType::LParen) => true,
+        (TokenType::Operator, TokenType::Number) => true,
+        (TokenType::Operator, TokenType::String) => true,
+        (TokenType::Operator, TokenType::LocalLabelRef) => true,
+        (TokenType::Operator, TokenType::Name) => true,
+        (TokenType::Operator, TokenType::MacroArg) => true,
 
         // Numbers
-        (&TokenType::Number, &TokenType::RParen) => true,
-        (&TokenType::Number, &TokenType::Operator) => true,
-        (&TokenType::Number, &TokenType::Comma) => true,
+        (TokenType::Number, TokenType::RParen) => true,
+        (TokenType::Number, TokenType::Operator) => true,
+        (TokenType::Number, TokenType::Comma) => true,
 
         // Strings
-        (&TokenType::String, &TokenType::RParen) => true,
-        (&TokenType::String, &TokenType::Operator) => true,
-        (&TokenType::String, &TokenType::Comma) => true,
+        (TokenType::String, TokenType::RParen) => true,
+        (TokenType::String, TokenType::Operator) => true,
+        (TokenType::String, TokenType::Comma) => true,
 
         // LocalLabelRef
-        (&TokenType::LocalLabelRef, &TokenType::RParen) => true,
-        (&TokenType::LocalLabelRef, &TokenType::Operator) => true,
-        (&TokenType::LocalLabelRef, &TokenType::Comma) => true,
+        (TokenType::LocalLabelRef, TokenType::RParen) => true,
+        (TokenType::LocalLabelRef, TokenType::Operator) => true,
+        (TokenType::LocalLabelRef, TokenType::Comma) => true,
 
         // Names
-        (&TokenType::Name, &TokenType::LParen) => true,
-        (&TokenType::Name, &TokenType::RParen) => true,
-        (&TokenType::Name, &TokenType::Operator) => true,
-        (&TokenType::Name, &TokenType::Comma) => true,
+        (TokenType::Name, TokenType::LParen) => true,
+        (TokenType::Name, TokenType::RParen) => true,
+        (TokenType::Name, TokenType::Operator) => true,
+        (TokenType::Name, TokenType::Comma) => true,
 
         // Macro Args
-        (&TokenType::MacroArg, &TokenType::LParen) => true,
-        (&TokenType::MacroArg, &TokenType::RParen) => true,
-        (&TokenType::MacroArg, &TokenType::Operator) => true,
-        (&TokenType::MacroArg, &TokenType::Comma) => true,
+        (TokenType::MacroArg, TokenType::LParen) => true,
+        (TokenType::MacroArg, TokenType::RParen) => true,
+        (TokenType::MacroArg, TokenType::Operator) => true,
+        (TokenType::MacroArg, TokenType::Comma) => true,
 
         // Comma
-        (&TokenType::Comma, &TokenType::LParen) => true,
-        (&TokenType::Comma, &TokenType::Name) => true,
-        (&TokenType::Comma, &TokenType::String) => true,
-        (&TokenType::Comma, &TokenType::Number) => true,
-        (&TokenType::Comma, &TokenType::MacroArg) => true,
+        (TokenType::Comma, TokenType::LParen) => true,
+        (TokenType::Comma, TokenType::Name) => true,
+        (TokenType::Comma, TokenType::String) => true,
+        (TokenType::Comma, TokenType::Number) => true,
+        (TokenType::Comma, TokenType::MacroArg) => true,
 
         // Directive Values
-        (&TokenType::Directive, &TokenType::LParen) => true,
-        (&TokenType::Directive, &TokenType::Name) => true,
-        (&TokenType::Directive, &TokenType::String) => true,
-        (&TokenType::Directive, &TokenType::Number) => true,
-        (&TokenType::Directive, &TokenType::MacroArg) => true,
+        (TokenType::Directive, TokenType::LParen) => true,
+        (TokenType::Directive, TokenType::Name) => true,
+        (TokenType::Directive, TokenType::String) => true,
+        (TokenType::Directive, TokenType::Number) => true,
+        (TokenType::Directive, TokenType::MacroArg) => true,
 
         // Instruction Values
-        (&TokenType::Instruction, &TokenType::LParen) => true,
-        (&TokenType::Instruction, &TokenType::Name) => true,
-        (&TokenType::Instruction, &TokenType::String) => true,
-        (&TokenType::Instruction, &TokenType::Number) => true,
-        (&TokenType::Instruction, &TokenType::MacroArg) => true,
+        (TokenType::Instruction, TokenType::LParen) => true,
+        (TokenType::Instruction, TokenType::Name) => true,
+        (TokenType::Instruction, TokenType::String) => true,
+        (TokenType::Instruction, TokenType::Number) => true,
+        (TokenType::Instruction, TokenType::MacroArg) => true,
 
         // Everything else
         (_, _) => false
